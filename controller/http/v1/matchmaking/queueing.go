@@ -23,3 +23,7 @@ func (m *MatchmakingServer) Queueing(ctx *gin.Context) {
 	}
 
 }
+
+// 問題
+// 如果nats斷線 要怎麼通知在排隊的client
+// 要如何把排隊中的人 放到同一局的遊戲裡 再多pod的架構下
