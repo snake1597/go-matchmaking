@@ -1,6 +1,11 @@
 package model
 
 type UserRank struct {
-	UserId string
+	UserID string
+	Rank   int64
+}
+
+type UserQueueingInfo struct {
+	UserID string
 	Rank   int64
 }
