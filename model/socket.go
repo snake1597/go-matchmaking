@@ -1,7 +1,9 @@
 package model
 
 import (
-	"bytes"
+	"encoding/json"
+	"fmt"
+	"go-matchmaking/enum"
 	"time"
 
 	log "github.com/sirupsen/logrus"
@@ -13,8 +15,7 @@ type Socket interface {
 	read()
 	write()
 	Close()
-	Send(msg []byte) error
-	GetUserID() string
+	Send(msg []byte) bool
 }
 
 const (
@@ -26,7 +27,6 @@ const (
 
 var (
 	newline = []byte{'\n'}
-	space   = []byte{' '}
 )
 
 type WebSocketClient struct {
@@ -50,10 +50,9 @@ func NewWebsocketClient(conn *websocket.Conn, hubChannel *HubChannel) Socket {
 	return client
 }
 
-// TODO read功能該做什麼還未確定
 func (w *WebSocketClient) read() {
 	defer func() {
-		w.hubChannel.Unregister <- w
+		w.hubChannel.Unregister <- w.UserID
 		w.Close()
 	}()
 
@@ -69,9 +68,27 @@ func (w *WebSocketClient) read() {
 			}
 			break
 		}
-		message = bytes.TrimSpace(bytes.Replace(message, newline, space, -1))
-		w.hubChannel.Broadcast <- message
+
+		err = w.messageHandle(message)
+		if err != nil {
+			log.Errorf("messageHandle error: %v", err)
+		}
 	}
+}
+
+func (w *WebSocketClient) messageHandle(message []byte) (err error) {
+	broadcastInfo := &BroadcastInfo{}
+	err = json.Unmarshal(message, &broadcastInfo)
+	if err != nil {
+		return fmt.Errorf("unmarshal BroadcastInfo error: %v", err)
+	}
+
+	switch broadcastInfo.Action {
+	case enum.BroadcastActionJoin:
+		// TODO 通知redis 加入房間
+	}
+
+	return nil
 }
 
 func (w *WebSocketClient) write() {
@@ -114,19 +131,15 @@ func (w *WebSocketClient) write() {
 	}
 }
 
-func (w *WebSocketClient) Send(msg []byte) error {
-	if !w.IsClose {
-		w.send <- msg
+func (w *WebSocketClient) Send(msg []byte) bool {
+	if w.IsClose {
+		return false
 	}
-
-	return nil
+	w.send <- msg
+	return true
 }
 
 func (w *WebSocketClient) Close() {
 	close(w.send)
 	w.IsClose = true
-}
-
-func (w *WebSocketClient) GetUserID() string {
-	return w.UserID
 }

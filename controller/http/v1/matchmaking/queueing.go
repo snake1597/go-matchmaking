@@ -22,19 +22,14 @@ func (m *MatchmakingServer) Queueing(ctx *gin.Context) {
 		return
 	}
 
-	userRank := &model.UserRank{}
-	err = ctx.ShouldBindJSON(&userRank)
+	queueingInfo := &model.UserQueueingInfo{}
+	err = ctx.ShouldBindJSON(&queueingInfo)
 	if err != nil {
 		ctx.JSON(http.StatusBadRequest, model.NewServerError(enum.ErrorException, err))
 		return
 	}
 
-	m.hubSrv.Register(userRank.UserID, conn)
-
-	queueingInfo := &model.UserQueueingInfo{
-		UserID: userRank.UserID,
-		Rank:   userRank.Rank,
-	}
+	m.hubSrv.Register(queueingInfo.UserID, conn)
 
 	infoByte, err := json.Marshal(queueingInfo)
 	if err != nil {
