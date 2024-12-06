@@ -1,11 +1,14 @@
 package model
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"go-matchmaking/enum"
+	"go-matchmaking/pkg/lua"
 	"time"
 
+	"github.com/redis/go-redis/v9"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/gorilla/websocket"
@@ -30,18 +33,24 @@ var (
 )
 
 type WebSocketClient struct {
-	conn       *websocket.Conn
 	send       chan []byte
 	UserID     string
 	hubChannel *HubChannel
 	IsClose    bool
+	conn       *websocket.Conn
+	cache      *redis.Client
 }
 
-func NewWebsocketClient(conn *websocket.Conn, hubChannel *HubChannel) Socket {
+func NewWebsocketClient(
+	conn *websocket.Conn,
+	hubChannel *HubChannel,
+	cache *redis.Client,
+) Socket {
 	client := &WebSocketClient{
 		conn:       conn,
 		send:       make(chan []byte, 256),
 		hubChannel: hubChannel,
+		cache:      cache,
 	}
 
 	go client.write()
@@ -85,7 +94,24 @@ func (w *WebSocketClient) messageHandle(message []byte) (err error) {
 
 	switch broadcastInfo.Action {
 	case enum.BroadcastActionJoin:
-		// TODO 通知redis 加入房間
+		cacheKeyList := []string{
+			fmt.Sprintf("room_%s", broadcastInfo.RoomID),
+		}
+
+		args := []interface{}{
+			broadcastInfo.UserIDList[0],
+		}
+
+		confirmCount, err := lua.ConfirmJoinRoom().Run(context.Background(), w.cache, cacheKeyList, args).Int()
+		if err != nil {
+			return fmt.Errorf("ConfirmJoinRoom error: %v", err)
+		}
+
+		if confirmCount != 10 {
+			return nil
+		}
+
+		// TODO 通知使用者可開始遊戲
 	}
 
 	return nil

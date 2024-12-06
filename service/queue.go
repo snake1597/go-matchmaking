@@ -1,12 +1,19 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
+	"go-matchmaking/enum"
 	"go-matchmaking/model"
 
+	"go-matchmaking/pkg/lua"
+
+	"github.com/google/uuid"
 	log "github.com/sirupsen/logrus"
 
 	"github.com/nats-io/nats.go"
+	"github.com/redis/go-redis/v9"
 )
 
 type QueueService interface {
@@ -15,17 +22,19 @@ type QueueService interface {
 }
 
 type NatsQueueService struct {
-	nc      *nats.Conn
 	channel string
+	nc      *nats.Conn
+	cache   *redis.Client
 }
 
 func NewNatsQueueService(
-	nc *nats.Conn,
 	channel string,
+	nc *nats.Conn,
+
 ) QueueService {
 	queue := &NatsQueueService{
-		nc:      nc,
 		channel: channel,
+		nc:      nc,
 	}
 
 	queue.subscribe()
@@ -52,7 +61,10 @@ func (n *NatsQueueService) subscribe() {
 				log.Errorf("Unmarshal UserQueueingInfo error: %v", err)
 			}
 
-			n.matchmaking(queueingInfo)
+			err = n.matchmaking(queueingInfo)
+			if err != nil {
+				log.Errorf("matchmaking error: %v, info: %+v", err, queueingInfo)
+			}
 
 			log.Printf("Received a message from %s : %s\n", n.channel, string(m.Data))
 		})
@@ -62,6 +74,62 @@ func (n *NatsQueueService) subscribe() {
 	}()
 }
 
-func (n *NatsQueueService) matchmaking(queueingInfo *model.UserQueueingInfo) {
+// TODO 延伸
+// 配對後能取消
+// 根據rank來匹配
 
+// 問題
+// 要如何確認client可以被加入房間
+// 能確認是否加入 需要有時間限制 時間一到 原確認的要續留 再補上空缺
+func (n *NatsQueueService) matchmaking(queueingInfo *model.UserQueueingInfo) (err error) {
+	ctx := context.Background()
+
+	cacheKeyList := []string{
+		"room",
+	}
+
+	roomSize := 10
+	args := []interface{}{
+		roomSize, // TODO 房間人數, to env
+		queueingInfo.UserID,
+	}
+
+	userIDList, err := lua.JoinRoom().Run(ctx, n.cache, cacheKeyList, args).StringSlice()
+	if err != nil {
+		return fmt.Errorf("JoinRoom error: %v", err)
+	}
+
+	if len(userIDList) < roomSize {
+		return nil
+	}
+
+	broadcastInfo := model.BroadcastInfo{
+		Action:     enum.BroadcastActionJoin,
+		UserIDList: userIDList,
+		RoomID:     uuid.NewString(),
+	}
+
+	setValue := make(map[string]string)
+	for _, userID := range broadcastInfo.UserIDList {
+		setValue[userID] = ""
+	}
+
+	// TODO cache key to enum
+	err = n.cache.HSet(ctx, fmt.Sprintf("room_%s", broadcastInfo.RoomID), setValue).Err()
+	if err != nil {
+		return fmt.Errorf("HSet error: %v", err)
+	}
+
+	info, err := json.Marshal(broadcastInfo)
+	if err != nil {
+		return fmt.Errorf("json marshal error: %v", err)
+	}
+
+	// TODO rename public channel
+	err = n.nc.Publish("channel", info)
+	if err != nil {
+		return fmt.Errorf("publish error: %v", err)
+	}
+
+	return nil
 }

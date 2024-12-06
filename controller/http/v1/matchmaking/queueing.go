@@ -9,6 +9,7 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+// TODO
 // 問題
 // 發生錯誤要通知排隊失敗
 // 在多pod的架構下 要如何把排隊中的人 放到同一局的遊戲裡
