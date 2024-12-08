@@ -29,10 +29,31 @@ func NewClient(
 	}
 }
 
-func (c *Client) Publish() {}
+func (c *Client) Publish(chanel string, msg []byte) error {
+	err := c.nc.Publish(chanel, msg)
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
 
 func (c *Client) Subscribe(chanel string, fc func(msg []byte) error) error {
 	_, err := c.nc.Subscribe(chanel, func(m *nats.Msg) {
+		err := fc(m.Data)
+		if err != nil {
+			log.Errorf("receive msg error: %v", err)
+		}
+	})
+	if err != nil {
+		return err
+	}
+
+	return nil
+}
+
+func (c *Client) GroupSubscribe(chanel string, groupName string, fc func(msg []byte) error) error {
+	_, err := c.nc.QueueSubscribe(chanel, groupName, func(m *nats.Msg) {
 		err := fc(m.Data)
 		if err != nil {
 			log.Errorf("receive msg error: %v", err)

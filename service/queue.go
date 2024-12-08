@@ -19,7 +19,6 @@ import (
 
 type QueueService struct {
 	channel string
-	nc      *nats.Conn
 	cache   *redis.Client
 	mq      model.MessageQueue
 }
@@ -27,19 +26,20 @@ type QueueService struct {
 func NewNatsQueueService(
 	channel string,
 	nc *nats.Conn,
+	mq model.MessageQueue,
 ) model.QueueService {
 	queue := &QueueService{
 		channel: channel,
-		nc:      nc,
+		mq:      mq,
 	}
 
-	queue.subscribe()
+	queue.Subscribe()
 
 	return queue
 }
 
-func (n *QueueService) Publish(msg []byte) (err error) {
-	err = n.nc.Publish(n.channel, msg)
+func (q *QueueService) Publish(msg []byte) (err error) {
+	err = q.mq.Publish(q.channel, msg)
 	if err != nil {
 		return err
 	}
@@ -47,22 +47,22 @@ func (n *QueueService) Publish(msg []byte) (err error) {
 	return nil
 }
 
-func (n *QueueService) subscribe() {
+func (q *QueueService) Subscribe() {
 	go func() {
 		// TODO to env, group queue name: q1
-		_, err := n.nc.QueueSubscribe(n.channel, "q1", func(m *nats.Msg) {
+		err := q.mq.GroupSubscribe(q.channel, "q1", func(msg []byte) error {
 			queueingInfo := &model.UserQueueingInfo{}
-			err := json.Unmarshal([]byte(m.Data), &queueingInfo)
+			err := json.Unmarshal(msg, &queueingInfo)
 			if err != nil {
-				log.Errorf("Unmarshal UserQueueingInfo error: %v", err)
+				return fmt.Errorf("unmarshal UserQueueingInfo error: %v", err)
 			}
 
-			err = n.matchmaking(queueingInfo)
+			err = q.matchmaking(queueingInfo)
 			if err != nil {
-				log.Errorf("matchmaking error: %v, info: %+v", err, queueingInfo)
+				return fmt.Errorf("matchmaking error: %v, info: %+v", err, queueingInfo)
 			}
 
-			log.Printf("Received a message from %s : %s\n", n.channel, string(m.Data))
+			return nil
 		})
 		if err != nil {
 			log.Errorf("nats subscribe error: %v", err)
@@ -77,6 +77,7 @@ func (n *QueueService) subscribe() {
 // 問題
 // 要如何確認client可以被加入房間
 // 能確認是否加入 需要有時間限制 時間一到 原確認的要續留 再補上空缺
+// ans: 改為排到redis list最前面
 func (n *QueueService) matchmaking(queueingInfo *model.UserQueueingInfo) (err error) {
 	ctx := context.Background()
 
@@ -128,7 +129,7 @@ func (n *QueueService) matchmaking(queueingInfo *model.UserQueueingInfo) (err er
 	}
 
 	// TODO rename public channel
-	err = n.nc.Publish("channel", info)
+	err = n.mq.Publish("channel", info)
 	if err != nil {
 		return fmt.Errorf("publish error: %v", err)
 	}
