@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"go-matchmaking/enum"
 	"go-matchmaking/model"
+	"time"
 
 	"go-matchmaking/pkg/lua"
 
@@ -16,23 +17,18 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-type QueueService interface {
-	Publish(msg []byte) error
-	subscribe()
-}
-
-type NatsQueueService struct {
+type QueueService struct {
 	channel string
 	nc      *nats.Conn
 	cache   *redis.Client
+	mq      model.MessageQueue
 }
 
 func NewNatsQueueService(
 	channel string,
 	nc *nats.Conn,
-
-) QueueService {
-	queue := &NatsQueueService{
+) model.QueueService {
+	queue := &QueueService{
 		channel: channel,
 		nc:      nc,
 	}
@@ -42,7 +38,7 @@ func NewNatsQueueService(
 	return queue
 }
 
-func (n *NatsQueueService) Publish(msg []byte) (err error) {
+func (n *QueueService) Publish(msg []byte) (err error) {
 	err = n.nc.Publish(n.channel, msg)
 	if err != nil {
 		return err
@@ -51,7 +47,7 @@ func (n *NatsQueueService) Publish(msg []byte) (err error) {
 	return nil
 }
 
-func (n *NatsQueueService) subscribe() {
+func (n *QueueService) subscribe() {
 	go func() {
 		// TODO to env, group queue name: q1
 		_, err := n.nc.QueueSubscribe(n.channel, "q1", func(m *nats.Msg) {
@@ -81,7 +77,7 @@ func (n *NatsQueueService) subscribe() {
 // 問題
 // 要如何確認client可以被加入房間
 // 能確認是否加入 需要有時間限制 時間一到 原確認的要續留 再補上空缺
-func (n *NatsQueueService) matchmaking(queueingInfo *model.UserQueueingInfo) (err error) {
+func (n *QueueService) matchmaking(queueingInfo *model.UserQueueingInfo) (err error) {
 	ctx := context.Background()
 
 	cacheKeyList := []string{
@@ -116,6 +112,12 @@ func (n *NatsQueueService) matchmaking(queueingInfo *model.UserQueueingInfo) (er
 
 	// TODO cache key to enum
 	err = n.cache.HSet(ctx, fmt.Sprintf("room_%s", broadcastInfo.RoomID), setValue).Err()
+	if err != nil {
+		return fmt.Errorf("HSet error: %v", err)
+	}
+
+	// TODO 跟HSet一起包成lua
+	err = n.cache.Expire(ctx, fmt.Sprintf("room_%s", broadcastInfo.RoomID), 10*time.Second).Err()
 	if err != nil {
 		return fmt.Errorf("HSet error: %v", err)
 	}

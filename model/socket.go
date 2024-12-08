@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"go-matchmaking/enum"
-	"go-matchmaking/pkg/lua"
 	"time"
 
 	"github.com/redis/go-redis/v9"
@@ -86,25 +85,32 @@ func (w *WebSocketClient) read() {
 }
 
 func (w *WebSocketClient) messageHandle(message []byte) (err error) {
-	broadcastInfo := &BroadcastInfo{}
-	err = json.Unmarshal(message, &broadcastInfo)
+	broadcastClientInfo := &BroadcastClientInfo{}
+	err = json.Unmarshal(message, &broadcastClientInfo)
 	if err != nil {
 		return fmt.Errorf("unmarshal BroadcastInfo error: %v", err)
 	}
 
-	switch broadcastInfo.Action {
+	switch broadcastClientInfo.Action {
 	case enum.BroadcastActionJoin:
-		cacheKeyList := []string{
-			fmt.Sprintf("room_%s", broadcastInfo.RoomID),
-		}
-
-		args := []interface{}{
-			broadcastInfo.UserIDList[0],
-		}
-
-		confirmCount, err := lua.ConfirmJoinRoom().Run(context.Background(), w.cache, cacheKeyList, args).Int()
+		room, err := w.cache.HGetAll(context.Background(), fmt.Sprintf("room_%s", broadcastClientInfo.RoomID)).Result()
 		if err != nil {
-			return fmt.Errorf("ConfirmJoinRoom error: %v", err)
+			return fmt.Errorf("HGetAll error: %v", err)
+		}
+
+		if len(room) == 0 {
+			// TODO hub publish to the nats
+		}
+
+		confirmCount := 0
+		for k, v := range room {
+			if k == w.UserID {
+				v = "confirm"
+			}
+
+			if v == "confirm" {
+				confirmCount += 1
+			}
 		}
 
 		if confirmCount != 10 {
