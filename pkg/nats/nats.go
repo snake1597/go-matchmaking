@@ -17,7 +17,7 @@ func NewClient(
 	token string,
 	address string,
 	port int,
-) model.MessageQueue {
+) model.MessageQueueHandler {
 	s := fmt.Sprintf("%s@%s:%d", token, address, port)
 	nc, err := nats.Connect(s)
 	if err != nil {

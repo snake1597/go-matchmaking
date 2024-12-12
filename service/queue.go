@@ -20,14 +20,14 @@ import (
 type QueueService struct {
 	channel string
 	cache   *redis.Client
-	mq      model.MessageQueue
+	mq      model.MessageQueueHandler
 }
 
 func NewNatsQueueService(
 	channel string,
 	nc *nats.Conn,
-	mq model.MessageQueue,
-) model.QueueService {
+	mq model.MessageQueueHandler,
+) model.QueueHandler {
 	queue := &QueueService{
 		channel: channel,
 		mq:      mq,

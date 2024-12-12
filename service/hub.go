@@ -16,6 +16,7 @@ type HubService interface {
 	Register(usedID string, conn *websocket.Conn)
 }
 
+// TODO 要有socket連線的上限
 type WebSocketHubService struct {
 	// TODO to sync map
 	clientMap  map[string]model.Socket
@@ -23,13 +24,13 @@ type WebSocketHubService struct {
 	broadcast  chan []byte
 	nc         *nats.Conn
 	cache      *redis.Client
-	mq         model.MessageQueue
+	mq         model.MessageQueueHandler
 }
 
 func NewWebSocketHubService(
 	nc *nats.Conn,
 	cache *redis.Client,
-	mq model.MessageQueue,
+	mq model.MessageQueueHandler,
 ) HubService {
 	hub := &WebSocketHubService{
 		clientMap: make(map[string]model.Socket),

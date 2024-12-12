@@ -1,6 +1,6 @@
 package model
 
-type QueueService interface {
+type QueueHandler interface {
 	Publish(msg []byte) error
 	Subscribe()
 }
