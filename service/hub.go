@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"go-matchmaking/enum"
 	"go-matchmaking/model"
+	"sync"
 
 	"github.com/gorilla/websocket"
 	"github.com/nats-io/nats.go"
@@ -18,8 +19,7 @@ type HubService interface {
 
 // TODO 要有socket連線的上限
 type WebSocketHubService struct {
-	// TODO to sync map
-	clientMap  map[string]model.Socket
+	clientMap  sync.Map
 	hubChannel *model.HubChannel
 	broadcast  chan []byte
 	nc         *nats.Conn
@@ -33,7 +33,7 @@ func NewWebSocketHubService(
 	mq model.MessageQueueHandler,
 ) HubService {
 	hub := &WebSocketHubService{
-		clientMap: make(map[string]model.Socket),
+		clientMap: sync.Map{},
 		hubChannel: &model.HubChannel{
 			Unregister: make(chan string),
 		},
@@ -51,29 +51,13 @@ func NewWebSocketHubService(
 
 func (w *WebSocketHubService) run() {
 	for userID := range w.hubChannel.Unregister {
-		if client, ok := w.clientMap[userID]; ok {
-			delete(w.clientMap, userID)
-			client.Close()
+		if client, ok := w.clientMap.Load(userID); ok {
+			w.clientMap.Delete(userID)
+			socket, ok := client.(model.Socket)
+			if ok {
+				socket.Close()
+			}
 		}
-	}
-	{
-		// 先註解 改成直接用broadcastHandle
-		// for {
-		// 	select {
-		// 	case userID := <-w.hubChannel.Unregister:
-		// 		if client, ok := w.clientMap[userID]; ok {
-		// 			delete(w.clientMap, userID)
-		// 			client.Close()
-		// 		}
-		// 	case message, ok := <-w.broadcast:
-		// 		if ok {
-		// 			err := w.broadcastHandle(message)
-		// 			if err != nil {
-		// 				log.Errorf("broadcastHandle error: %v", err)
-		// 			}
-		// 		}
-		// 	}
-		// }
 	}
 }
 
@@ -89,14 +73,19 @@ func (w *WebSocketHubService) subscribe() {
 
 		switch broadcastInfo.Action {
 		case enum.BroadcastActionPublic:
-			for userID, client := range w.clientMap {
-				// TODO 暫時不用全頻廣播
-				ok := client.Send([]byte{})
-				if !ok {
-					w.clientMap[userID].Close()
-					delete(w.clientMap, userID)
+			w.clientMap.Range(func(key any, value any) bool {
+				socket, ok := value.(model.Socket)
+				if ok {
+					// TODO 暫時不用全頻廣播
+					isSend := socket.Send([]byte{})
+					if !isSend {
+						w.clientMap.Delete(key)
+						socket.Close()
+					}
 				}
-			}
+
+				return true
+			})
 		case enum.BroadcastActionJoin:
 			m := &model.BroadcastClientInfo{
 				Action: broadcastInfo.Action,
@@ -109,8 +98,11 @@ func (w *WebSocketHubService) subscribe() {
 			}
 
 			for _, userID := range broadcastInfo.UserIDList {
-				if client, ok := w.clientMap[userID]; ok {
-					client.Send(j)
+				if client, ok := w.clientMap.Load(userID); ok {
+					socket, ok := client.(model.Socket)
+					if ok {
+						socket.Send(j)
+					}
 				}
 			}
 		}
@@ -123,5 +115,6 @@ func (w *WebSocketHubService) subscribe() {
 }
 
 func (w *WebSocketHubService) Register(usedID string, conn *websocket.Conn) {
-	w.clientMap[usedID] = model.NewWebsocketClient(conn, w.hubChannel, w.cache)
+	socket := model.NewWebsocketClient(conn, w.hubChannel, w.cache)
+	w.clientMap.Store(usedID, socket)
 }
