@@ -62,9 +62,7 @@ func (w *WebSocketHubService) run() {
 }
 
 func (w *WebSocketHubService) subscribe() {
-	// TODO rename public channel
-	channel := "channel"
-	err := w.mq.Subscribe(channel, func(message []byte) error {
+	err := w.mq.Subscribe(enum.HubBroadcastChannel, func(message []byte) error {
 		broadcastInfo := &model.BroadcastInfo{}
 		err := json.Unmarshal(message, &broadcastInfo)
 		if err != nil {

@@ -11,26 +11,22 @@ import (
 	"go-matchmaking/pkg/lua"
 
 	"github.com/google/uuid"
-	log "github.com/sirupsen/logrus"
-
-	"github.com/nats-io/nats.go"
 	"github.com/redis/go-redis/v9"
+	log "github.com/sirupsen/logrus"
 )
 
 type QueueService struct {
-	channel string
-	cache   *redis.Client
-	mq      model.MessageQueueHandler
+	cache *redis.Client
+	mq    model.MessageQueueHandler
 }
 
 func NewNatsQueueService(
-	channel string,
-	nc *nats.Conn,
+	cache *redis.Client,
 	mq model.MessageQueueHandler,
 ) model.QueueHandler {
 	queue := &QueueService{
-		channel: channel,
-		mq:      mq,
+		cache: cache,
+		mq:    mq,
 	}
 
 	queue.Subscribe()
@@ -39,7 +35,7 @@ func NewNatsQueueService(
 }
 
 func (q *QueueService) Publish(msg []byte) (err error) {
-	err = q.mq.Publish(q.channel, msg)
+	err = q.mq.Publish(enum.GroupChannel, msg)
 	if err != nil {
 		return err
 	}
@@ -49,8 +45,7 @@ func (q *QueueService) Publish(msg []byte) (err error) {
 
 func (q *QueueService) Subscribe() {
 	go func() {
-		// TODO to env, group queue name: q1
-		err := q.mq.GroupSubscribe(q.channel, "q1", func(msg []byte) error {
+		err := q.mq.GroupSubscribe(enum.GroupChannel, enum.GroupName, func(msg []byte) error {
 			queueingInfo := &model.UserQueueingInfo{}
 			err := json.Unmarshal(msg, &queueingInfo)
 			if err != nil {
@@ -76,8 +71,6 @@ func (q *QueueService) Subscribe() {
 
 // 問題
 // 要如何確認client可以被加入房間
-// 能確認是否加入 需要有時間限制 時間一到 原確認的要續留 再補上空缺
-// ans: 改為排到redis list最前面
 func (n *QueueService) matchmaking(queueingInfo *model.UserQueueingInfo) (err error) {
 	ctx := context.Background()
 
@@ -111,14 +104,12 @@ func (n *QueueService) matchmaking(queueingInfo *model.UserQueueingInfo) (err er
 		setValue[userID] = ""
 	}
 
-	// TODO cache key to enum
-	err = n.cache.HSet(ctx, fmt.Sprintf("room_%s", broadcastInfo.RoomID), setValue).Err()
+	err = n.cache.Expire(ctx, fmt.Sprintf(enum.RoomKey, broadcastInfo.RoomID), 10*time.Second).Err()
 	if err != nil {
 		return fmt.Errorf("HSet error: %v", err)
 	}
 
-	// TODO 跟HSet一起包成lua
-	err = n.cache.Expire(ctx, fmt.Sprintf("room_%s", broadcastInfo.RoomID), 10*time.Second).Err()
+	err = n.cache.HSet(ctx, fmt.Sprintf(enum.RoomKey, broadcastInfo.RoomID), setValue).Err()
 	if err != nil {
 		return fmt.Errorf("HSet error: %v", err)
 	}
@@ -128,8 +119,7 @@ func (n *QueueService) matchmaking(queueingInfo *model.UserQueueingInfo) (err er
 		return fmt.Errorf("json marshal error: %v", err)
 	}
 
-	// TODO rename public channel
-	err = n.mq.Publish("channel", info)
+	err = n.mq.Publish(enum.HubBroadcastChannel, info)
 	if err != nil {
 		return fmt.Errorf("publish error: %v", err)
 	}

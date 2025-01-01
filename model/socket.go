@@ -93,7 +93,7 @@ func (w *WebSocketClient) messageHandle(message []byte) (err error) {
 
 	switch broadcastClientInfo.Action {
 	case enum.BroadcastActionJoin:
-		room, err := w.cache.HGetAll(context.Background(), fmt.Sprintf("room_%s", broadcastClientInfo.RoomID)).Result()
+		room, err := w.cache.HGetAll(context.Background(), fmt.Sprintf(enum.RoomKey, broadcastClientInfo.RoomID)).Result()
 		if err != nil {
 			return fmt.Errorf("HGetAll error: %v", err)
 		}
